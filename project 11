@@ -1,0 +1,243 @@
+// checkers.c
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <ctype.h>
+
+// Bitboard constants
+#define ROW_1 0x00000000000000FFULL
+#define ROW_8 0xFF00000000000000ULL
+
+typedef struct {
+    uint64_t red_pieces;
+    uint64_t black_pieces;
+    uint64_t red_kings;
+    uint64_t black_kings;
+    int current_turn; 
+} GameState;
+
+// Thia forward the declarations
+void PrintBoard(GameState *g);
+int IsOccupied(GameState *g, int pos);
+void MovePiece(GameState *g, int from, int to);
+void PromoteKings(GameState *g);
+int CheckWin(GameState *g);
+void PlayGame();
+void InitBoard(GameState *g);
+
+// Convert row and column (0–7 each) to bit position
+int CoordToBit(int row, int col) {
+    return row * 8 + col;
+}
+
+// Show board with ASCII and shows kings as R or B
+void PrintBoard(GameState *g) {
+    printf("\n     A  B  C  D  E  F  G  H\n");
+    printf("   +-----------------------+\n");
+    for (int row = 7; row >= 0; row--) {
+        printf(" %d |", row + 1);
+        for (int col = 0; col < 8; col++) {
+            int pos = CoordToBit(row, col);
+            uint64_t mask = 1ULL << pos;
+
+            if (g->red_kings & mask)
+                printf(" R ");
+            else if (g->red_pieces & mask)
+                printf(" r ");
+            else if (g->black_kings & mask)
+                printf(" B ");
+            else if (g->black_pieces & mask)
+                printf(" b ");
+            else
+                printf(" . ");
+        }
+        printf("| %d\n", row + 1);
+    }
+    printf("   +-----------------------+\n");
+    printf("     A  B  C  D  E  F  G  H\n");
+}
+
+// Checks if any piece occupies a square on the board
+int IsOccupied(GameState *g, int pos) {
+    uint64_t mask = 1ULL << pos;
+    return ((g->red_pieces | g->black_pieces | g->red_kings | g->black_kings) & mask) != 0;
+}
+
+// Moves piece 
+// Assumes caller has validated coordinates and that destination is empty
+void MovePiece(GameState *g, int from, int to) {
+    uint64_t fromMask = 1ULL << from;
+    uint64_t toMask = 1ULL << to;
+
+    int moverIsRed = (g->current_turn == 0);
+    uint64_t *myPieces   = moverIsRed ? &g->red_pieces  : &g->black_pieces;
+    uint64_t *myKings    = moverIsRed ? &g->red_kings   : &g->black_kings;
+    uint64_t *oppPieces  = moverIsRed ? &g->black_pieces: &g->red_pieces;
+    uint64_t *oppKings   = moverIsRed ? &g->black_kings : &g->red_kings;
+
+    int isKing = ((*myKings) & fromMask) != 0;
+    int isPiece = ((*myPieces) & fromMask) != 0;
+    if (!isKing && !isPiece) return; // nothing to move shouldn't happen if its validated
+
+    // Remove from origin
+    if (isKing) *myKings &= ~fromMask;
+    else       *myPieces &= ~fromMask;
+
+    // Handle captures 
+    int fromRow = from / 8, fromCol = from % 8;
+    int toRow = to / 8, toCol = to % 8;
+    if (abs(fromRow - toRow) == 2 && abs(fromCol - toCol) == 2) {
+        int midRow = (fromRow + toRow) / 2;
+        int midCol = (fromCol + toCol) / 2;
+        int midPos = CoordToBit(midRow, midCol);
+        uint64_t midMask = 1ULL << midPos;
+        *oppPieces &= ~midMask;
+        *oppKings  &= ~midMask;
+    }
+
+    // Place at destination and becomes king if appropriate after placing
+    if (isKing) *myKings |= toMask;
+    else        *myPieces |= toMask;
+
+    PromoteKings(g);
+
+    // Switch turn 
+    g->current_turn = 1 - g->current_turn;
+}
+
+// Promote pawns that reach far side
+void PromoteKings(GameState *g) {
+    g->red_kings |= g->red_pieces & ROW_8;
+    g->red_pieces &= ~ROW_8;
+
+    g->black_kings |= g->black_pieces & ROW_1;
+    g->black_pieces &= ~ROW_1;
+}
+
+// Win detection
+int CheckWin(GameState *g) {
+    if ((g->red_pieces | g->red_kings) == 0ULL)
+        return 1; // black wins
+    if ((g->black_pieces | g->black_kings) == 0ULL)
+        return 2; // red wins
+    return 0;     // game continues
+}
+
+// Initialize standard starting layout programmatically
+void InitBoard(GameState *g) {
+    g->red_pieces = 0ULL;
+    g->black_pieces = 0ULL;
+    g->red_kings = 0ULL;
+    g->black_kings = 0ULL;
+    // Place red on bottom, black on top on dark squares 
+    for (int r = 0; r <= 2; r++) {
+        for (int c = 0; c < 8; c++) {
+            if ((r + c) % 2 == 1) {
+                g->red_pieces |= 1ULL << CoordToBit(r, c);
+            }
+        }
+    }
+    for (int r = 5; r <= 7; r++) {
+        for (int c = 0; c < 8; c++) {
+            if ((r + c) % 2 == 1) {
+                g->black_pieces |= 1ULL << CoordToBit(r, c);
+            }
+        }
+    }
+    g->current_turn = 0; // Red starts
+}
+
+void PlayGame() {
+    GameState g;
+    InitBoard(&g);
+
+    while (1) {
+        PrintBoard(&g);
+        int win = CheckWin(&g);
+        if (win) {
+            if (win == 1) printf("\nBlack wins!\n");
+            else printf("\nRed wins!\n");
+            break;
+        }
+
+        printf("%s's turn. Enter move (e.g., B3 C4) or 'quit': ",
+               g.current_turn == 0 ? "Red" : "Black");
+
+        char line[64];
+        if (!fgets(line, sizeof line, stdin)) break;
+        // allow quit
+        if (tolower(line[0]) == 'q') break;
+
+        char fromColChar = 0, toColChar = 0;
+        int fromRow = 0, toRow = 0;
+        int n = sscanf(line, " %c%d %c%d", &fromColChar, &fromRow, &toColChar, &toRow);
+        if (n != 4) {
+            printf("Invalid input. Use format like B3 C4.\n");
+            continue;
+        }
+
+        char fromCol = toupper((unsigned char)fromColChar);
+        char toCol = toupper((unsigned char)toColChar);
+
+        if (fromCol < 'A' || fromCol > 'H' || toCol < 'A' || toCol > 'H' ||
+            fromRow < 1 || fromRow > 8 || toRow < 1 || toRow > 8) {
+            printf("Coordinates out of range. Columns A-H, rows 1-8.\n");
+            continue;
+        }
+
+        int from = CoordToBit(fromRow - 1, fromCol - 'A');
+        int to = CoordToBit(toRow - 1, toCol - 'A');
+
+        if (IsOccupied(&g, to)) {
+            printf("That square is occupied. Try again.\n");
+            continue;
+        }
+
+        // Validate the player actually has a piece at 'from'
+        uint64_t fromMask = 1ULL << from;
+        int moverIsRed = (g.current_turn == 0);
+        int hasPiece = moverIsRed ? ((g.red_pieces | g.red_kings) & fromMask) != 0
+                                   : ((g.black_pieces | g.black_kings) & fromMask) != 0;
+        if (!hasPiece) {
+            printf("You don't have a piece there. Try again.\n");
+            continue;
+        }
+
+        // Basic movement validation: diagonal move and distance 1 or 2
+        int fromR = from / 8, fromC = from % 8;
+        int toR = to / 8, toC = to % 8;
+        int dr = abs(fromR - toR), dc = abs(fromC - toC);
+        if (dr != dc || (dr != 1 && dr != 2)) {
+            printf("Moves must be diagonal by 1 (move) or 2 (capture).\n");
+            continue;
+        }
+
+        // If non-king, enforce forward direction
+        int isKing = (moverIsRed ? (g.red_kings & fromMask) : (g.black_kings & fromMask)) != 0;
+        if (!isKing && dr == 1) {
+            if (moverIsRed && toR < fromR) { printf("Red must move upward.\n"); continue; }
+            if (!moverIsRed && toR > fromR) { printf("Black must move downward.\n"); continue; }
+        }
+        // If attempting a capture, ensure there is an opponent piece in the middle
+        if (dr == 2) {
+            int midR = (fromR + toR) / 2;
+            int midC = (fromC + toC) / 2;
+            int midPos = CoordToBit(midR, midC);
+            uint64_t midMask = 1ULL << midPos;
+            int opponentHas = moverIsRed ? ((g.black_pieces | g.black_kings) & midMask) != 0
+                                         : ((g.red_pieces | g.red_kings) & midMask) != 0;
+            if (!opponentHas) {
+                printf("No opponent piece to capture.\n");
+                continue;
+            }
+        }
+
+        MovePiece(&g, from, to);
+    }
+}
+
+int main() {
+    printf("Welcome to Bitboard Checkers!\n");
+    PlayGame();
+    return 0;
+}
