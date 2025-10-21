@@ -2,6 +2,10 @@
 
 This is a checkers game that uses bit manipulation. You can move each piece by enter the code the piece is on and entering the code were you want to move the piece too. 
 Below is a image of the checker board 
+How to run the code is enter this into the terminal 
+mv "/Users/samspear/project 11" "/Users/samspear/checkers.c"
+gcc -std=c11 -Wall -Wextra -O2 -o checkers /Users/samspear/checkers.c
+./checkers
 
 
 <img width="375" height="261" alt="Screenshot 2025-10-20 at 9 11 06 PM" src="https://github.com/user-attachments/assets/0279199c-16ef-47ff-b198-49ce9f0a1d42" />
